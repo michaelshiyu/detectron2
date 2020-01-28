@@ -93,14 +93,14 @@ if __name__ == "__main__":
             start_time = time.time()
             if not args.save_raw_maps:
                 predictions, visualized_output = demo.run_on_image(img)
+                logger.info(
+                    "{}: detected {} instances in {:.2f}s".format(
+                        path, len(predictions["instances"]), time.time() - start_time
+                    )
+                )
             else:
                 maps = demo.get_maps(img)
 
-            logger.info(
-                "{}: detected {} instances in {:.2f}s".format(
-                    path, len(predictions["instances"]), time.time() - start_time
-                )
-            )
 
             if args.output:
                 if os.path.isdir(args.output):

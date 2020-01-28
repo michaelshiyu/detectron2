@@ -12,7 +12,7 @@ from detectron2.engine.defaults import DefaultPredictor
 from detectron2.utils.video_visualizer import VideoVisualizer
 from detectron2.utils.visualizer import ColorMode, Visualizer, _PanopticPrediction
 
-from .predictor import VisualizationDemo
+from predictor import VisualizationDemo
 
 
 class MapsGetter(VisualizationDemo):
@@ -41,6 +41,7 @@ class MapsGetter(VisualizationDemo):
         predictions = self.predictor(image)
         if "panoptic_seg" in predictions:
             panoptic_seg, segments_info = predictions["panoptic_seg"]
+            panoptic_seg = panoptic_seg.to(self.cpu_device)
             self.pred = _PanopticPrediction(panoptic_seg, segments_info)
             sem_map, ins_map = self.panoptic_seg2sem_map(panoptic_seg), \
                                self.panoptic_seg2ins_map(panoptic_seg)
@@ -55,11 +56,11 @@ class MapsGetter(VisualizationDemo):
 
     def panoptic_seg2sem_map(self, panoptic_seg):
         n_classes = len(self.metadata.stuff_classes)
-        class2color = {self.metadata.stuff_class[i]: i for i in range(n_classes)}
+        class2color = {self.metadata.stuff_classes[i]: i for i in range(n_classes)}
         canvas = np.zeros(list(panoptic_seg.shape))
 
         for mask, sinfo in self.pred.semantic_masks():
-            color = class2color[self.metadata.stuff_class[sinfo["category_id"]]]
+            color = class2color[self.metadata.stuff_classes[sinfo["category_id"]]]
             canvas += mask.astype(np.int) * color
 
         return canvas
