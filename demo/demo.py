@@ -12,6 +12,7 @@ from detectron2.data.detection_utils import read_image
 from detectron2.utils.logger import setup_logger
 
 from predictor import VisualizationDemo
+from maps_getter import MapsGetter
 
 # constants
 WINDOW_NAME = "COCO detections"
@@ -59,6 +60,13 @@ def get_parser():
         default=[],
         nargs=argparse.REMAINDER,
     )
+    parser.add_argument(
+        "--save_raw_maps",
+        help="If specified, only save the raw map(s) (panoptic, instance, etc.). "
+        "The saved file name(s) is the argument passed to the 'output' parameter "
+        "appended with the type of the map(s) stored.",
+        action="store_true"
+    )
     return parser
 
 
@@ -70,7 +78,10 @@ if __name__ == "__main__":
 
     cfg = setup_cfg(args)
 
-    demo = VisualizationDemo(cfg)
+    if args.save_raw_maps:
+        assert args.output, "To save raw map(s), need to specify the 'output' parameter."
+
+    demo = VisualizationDemo(cfg) if not args.save_raw_maps else MapsGetter(cfg)
 
     if args.input:
         if len(args.input) == 1:
@@ -80,7 +91,11 @@ if __name__ == "__main__":
             # use PIL, to be consistent with evaluation
             img = read_image(path, format="BGR")
             start_time = time.time()
-            predictions, visualized_output = demo.run_on_image(img)
+            if not args.save_raw_maps:
+                predictions, visualized_output = demo.run_on_image(img)
+            else:
+                maps = demo.get_maps(img)
+
             logger.info(
                 "{}: detected {} instances in {:.2f}s".format(
                     path, len(predictions["instances"]), time.time() - start_time
@@ -94,7 +109,14 @@ if __name__ == "__main__":
                 else:
                     assert len(args.input) == 1, "Please specify a directory with args.output"
                     out_filename = args.output
-                visualized_output.save(out_filename)
+                if not args.save_raw_maps:
+                    visualized_output.save(out_filename)
+                else:
+                    for map_name, map in maps.items():
+                        cv2.imwrite(
+                            os.path.splitext(out_filename)[0] + '_' + map_name + '.png',
+                            map
+                        )
             else:
                 cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
                 cv2.imshow(WINDOW_NAME, visualized_output.get_image()[:, :, ::-1])
