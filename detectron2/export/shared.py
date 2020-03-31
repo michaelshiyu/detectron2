@@ -671,7 +671,7 @@ def rename_op_input(
     - It requires the input is only consumed by this op.
     - This function modifies predict_net and init_net in-place.
     - When from_producer is enable, this also updates other operators that consumes
-        the same input. Be cautious because may trigger unintended behaviour.
+        the same input. Be cautious because may trigger unintended behavior.
     """
     assert isinstance(predict_net, caffe2_pb2.NetDef)
     assert isinstance(init_net, caffe2_pb2.NetDef)
@@ -831,7 +831,9 @@ def _get_dependency_chain(ssa, versioned_target, versioned_source):
     consumer_map = get_consumer_map(ssa)
     producer_map = get_producer_map(ssa)
     start_op = min(x[0] for x in consumer_map[versioned_source]) - 15
-    end_op = producer_map[versioned_target][0] + 15
+    end_op = (
+        producer_map[versioned_target][0] + 15 if versioned_target in producer_map else start_op
+    )
     sub_graph_ssa = ssa[start_op : end_op + 1]
     if len(sub_graph_ssa) > 30:
         logger.warning(

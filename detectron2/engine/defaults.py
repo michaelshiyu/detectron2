@@ -12,6 +12,7 @@ since they are meant to represent the "common default behavior" people need in t
 import argparse
 import logging
 import os
+import sys
 from collections import OrderedDict
 import torch
 from fvcore.common.file_io import PathManager
@@ -69,7 +70,7 @@ def default_argument_parser():
     # PyTorch still may leave orphan processes in multi-gpu training.
     # Therefore we use a deterministic way to obtain port,
     # so that users are aware of orphan processes by seeing the port occupied.
-    port = 2 ** 15 + 2 ** 14 + hash(os.getuid()) % 2 ** 14
+    port = 2 ** 15 + 2 ** 14 + hash(os.getuid() if sys.platform != "win32" else 1) % 2 ** 14
     parser.add_argument("--dist-url", default="tcp://127.0.0.1:{}".format(port))
     parser.add_argument(
         "opts",
@@ -118,7 +119,7 @@ def default_setup(cfg, args):
         path = os.path.join(output_dir, "config.yaml")
         with PathManager.open(path, "w") as f:
             f.write(cfg.dump())
-        logger.info("Full config saved to {}".format(os.path.abspath(path)))
+        logger.info("Full config saved to {}".format(path))
 
     # make sure each worker has a different, yet deterministic seed if specified
     seed_all_rng(None if cfg.SEED < 0 else cfg.SEED + rank)
@@ -133,10 +134,14 @@ class DefaultPredictor:
     """
     Create a simple end-to-end predictor with the given config that runs on
     single device for a single input image.
-    The predictor takes an BGR image, resizes it to the specified resolution,
-    runs the model and produces a dict of predictions.
 
-    This predictor takes care of model loading and input preprocessing for you.
+    Compared to using the model directly, this class does the following additions:
+
+    1. Load checkpoint from `cfg.MODEL.WEIGHTS`.
+    2. Always take BGR image as the input and apply conversion defined by `cfg.INPUT.FORMAT`.
+    3. Apply resizing defined by `cfg.INPUT.{MIN,MAX}_SIZE_TEST`.
+    4. Take one input image and produce a single output, instead of a batch.
+
     If you'd like to do anything more fancy, please refer to its source code
     as examples to build and use the model manually.
 
@@ -199,7 +204,8 @@ class DefaultTrainer(SimpleTrainer):
     contains the following logic in addition:
 
     1. Create model, optimizer, scheduler, dataloader from the given config.
-    2. Load a checkpoint or `cfg.MODEL.WEIGHTS`, if exists.
+    2. Load a checkpoint or `cfg.MODEL.WEIGHTS`, if exists, when
+       `resume_or_load` is called.
     3. Register a few common hooks.
 
     It is created to simplify the **standard model training workflow** and reduce code boilerplate
@@ -221,11 +227,6 @@ class DefaultTrainer(SimpleTrainer):
     It is only guaranteed to work well with the standard models and training workflow in detectron2.
     To obtain more stable behavior, write your own training logic with other public APIs.
 
-    Attributes:
-        scheduler:
-        checkpointer (DetectionCheckpointer):
-        cfg (CfgNode):
-
     Examples:
 
     .. code-block:: python
@@ -233,6 +234,11 @@ class DefaultTrainer(SimpleTrainer):
         trainer = DefaultTrainer(cfg)
         trainer.resume_or_load()  # load last checkpoint or MODEL.WEIGHTS
         trainer.train()
+
+    Attributes:
+        scheduler:
+        checkpointer (DetectionCheckpointer):
+        cfg (CfgNode):
     """
 
     def __init__(self, cfg):
@@ -273,21 +279,19 @@ class DefaultTrainer(SimpleTrainer):
 
     def resume_or_load(self, resume=True):
         """
-        If `resume==True`, and last checkpoint exists, resume from it.
+        If `resume==True`, and last checkpoint exists, resume from it and load all
+        checkpointables (eg. optimizer and scheduler).
 
-        Otherwise, load a model specified by the config.
+        Otherwise, load the model specified by the config (skip all checkpointables).
 
         Args:
             resume (bool): whether to do resume or not
         """
+        checkpoint = self.checkpointer.resume_or_load(self.cfg.MODEL.WEIGHTS, resume=resume)
+        self.start_iter = checkpoint.get("iteration", -1) if resume else -1
         # The checkpoint stores the training iteration that just finished, thus we start
         # at the next iteration (or iter zero if there's no checkpoint).
-        self.start_iter = (
-            self.checkpointer.resume_or_load(self.cfg.MODEL.WEIGHTS, resume=resume).get(
-                "iteration", -1
-            )
-            + 1
-        )
+        self.start_iter += 1
 
     def build_hooks(self):
         """
@@ -333,7 +337,7 @@ class DefaultTrainer(SimpleTrainer):
 
         if comm.is_main_process():
             # run writers in the end, so that evaluation metrics are written
-            ret.append(hooks.PeriodicWriter(self.build_writers()))
+            ret.append(hooks.PeriodicWriter(self.build_writers(), period=20))
         return ret
 
     def build_writers(self):
@@ -358,7 +362,7 @@ class DefaultTrainer(SimpleTrainer):
             ]
 
         """
-        # Assume the default print/log frequency.
+        # Here the default print/log frequency of each writer is used.
         return [
             # It may not always print what you want to see, since it prints "common" metrics only.
             CommonMetricPrinter(self.max_iter),
@@ -374,7 +378,10 @@ class DefaultTrainer(SimpleTrainer):
             OrderedDict of results, if evaluation is enabled. Otherwise None.
         """
         super().train(self.start_iter, self.max_iter)
-        if hasattr(self, "_last_eval_results") and comm.is_main_process():
+        if len(self.cfg.TEST.EXPECTED_RESULTS) and comm.is_main_process():
+            assert hasattr(
+                self, "_last_eval_results"
+            ), "No evaluation results obtained during training!"
             verify_results(self.cfg, self._last_eval_results)
             return self._last_eval_results
 
@@ -437,13 +444,16 @@ class DefaultTrainer(SimpleTrainer):
     def build_evaluator(cls, cfg, dataset_name):
         """
         Returns:
-            DatasetEvaluator
+            DatasetEvaluator or None
 
         It is not implemented by default.
         """
         raise NotImplementedError(
-            "Please either implement `build_evaluator()` in subclasses, or pass "
-            "your evaluator as arguments to `DefaultTrainer.test()`."
+            """
+If you want DefaultTrainer to automatically run evaluation,
+please implement `build_evaluator()` in subclasses (see train_net.py for example).
+Alternatively, you can call evaluation functions yourself (see Colab balloon tutorial for example).
+"""
         )
 
     @classmethod

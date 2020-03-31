@@ -31,7 +31,7 @@ import sphinx_rtd_theme
 from recommonmark.parser import CommonMarkParser
 
 sys.path.insert(0, os.path.abspath("../"))
-
+os.environ["DOC_BUILDING"] = "True"
 DEPLOY = os.environ.get("READTHEDOCS") == "True"
 
 
@@ -86,7 +86,7 @@ import detectron2  # isort: skip
 
 
 project = "detectron2"
-copyright = "2019, detectron2 contributors"
+copyright = "2019-2020, detectron2 contributors"
 author = "detectron2 contributors"
 
 # The short X.Y version
@@ -285,7 +285,6 @@ def setup(app):
         "recommonmark_config",
         {
             "url_resolver": url_resolver,
-            "auto_toc_tree_section": "Contents",
             "enable_math": True,
             "enable_inline_math": True,
             "enable_eval_rst": True,

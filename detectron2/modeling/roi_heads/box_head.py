@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from detectron2.layers import Conv2d, ShapeSpec, get_norm
+from detectron2.layers import Conv2d, Linear, ShapeSpec, get_norm
 from detectron2.utils.registry import Registry
 
 ROI_BOX_HEAD_REGISTRY = Registry("ROI_BOX_HEAD")
@@ -60,7 +60,7 @@ class FastRCNNConvFCHead(nn.Module):
 
         self.fcs = []
         for k in range(num_fc):
-            fc = nn.Linear(np.prod(self._output_size), fc_dim)
+            fc = Linear(np.prod(self._output_size), fc_dim)
             self.add_module("fc{}".format(k + 1), fc)
             self.fcs.append(fc)
             self._output_size = fc_dim
@@ -81,8 +81,16 @@ class FastRCNNConvFCHead(nn.Module):
         return x
 
     @property
-    def output_size(self):
-        return self._output_size
+    def output_shape(self):
+        """
+        Returns:
+            ShapeSpec: the output feature shape
+        """
+        o = self._output_size
+        if isinstance(o, int):
+            return ShapeSpec(channels=o)
+        else:
+            return ShapeSpec(channels=o[0], height=o[1], width=o[2])
 
 
 def build_box_head(cfg, input_shape):

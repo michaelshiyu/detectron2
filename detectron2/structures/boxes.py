@@ -93,6 +93,13 @@ class BoxMode(IntEnum):
             arr[:, 3] = arr[:, 1] + new_h
 
             arr = arr[:, :4].to(dtype=original_dtype)
+        elif from_mode == BoxMode.XYWH_ABS and to_mode == BoxMode.XYWHA_ABS:
+            original_dtype = arr.dtype
+            arr = arr.double()
+            arr[:, 0] += arr[:, 2] / 2.0
+            arr[:, 1] += arr[:, 3] / 2.0
+            angles = torch.zeros((arr.shape[0], 1), dtype=arr.dtype)
+            arr = torch.cat((arr, angles), axis=1).to(dtype=original_dtype)
         else:
             if to_mode == BoxMode.XYXY_ABS and from_mode == BoxMode.XYWH_ABS:
                 arr[:, 2] += arr[:, 0]
@@ -108,7 +115,7 @@ class BoxMode(IntEnum):
                 )
 
         if single_box:
-            return original_type(arr.flatten())
+            return original_type(arr.flatten().tolist())
         if is_numpy:
             return arr.numpy()
         else:
@@ -124,7 +131,7 @@ class Boxes:
     (support indexing, `to(device)`, `.device`, and iteration over all boxes)
 
     Attributes:
-        tensor (torch.Tensor): float matrix of Nx4.
+        tensor (torch.Tensor): float matrix of Nx4. Each row is (x1, y1, x2, y2).
     """
 
     BoxSizeType = Union[List[int], Tuple[int, int]]
@@ -137,7 +144,9 @@ class Boxes:
         device = tensor.device if isinstance(tensor, torch.Tensor) else torch.device("cpu")
         tensor = torch.as_tensor(tensor, dtype=torch.float32, device=device)
         if tensor.numel() == 0:
-            tensor = torch.zeros(0, 4, dtype=torch.float32, device=device)
+            # Use reshape, so we don't end up creating a new tensor that does not depend on
+            # the inputs (and consequently confuses jit)
+            tensor = tensor.reshape((0, 4)).to(dtype=torch.float32, device=device)
         assert tensor.dim() == 2 and tensor.size(-1) == 4, tensor.size()
 
         self.tensor = tensor

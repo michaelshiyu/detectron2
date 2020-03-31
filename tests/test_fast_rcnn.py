@@ -4,6 +4,7 @@ import unittest
 import torch
 
 from detectron2.config import get_cfg
+from detectron2.layers import ShapeSpec
 from detectron2.modeling.box_regression import Box2BoxTransform, Box2BoxTransformRotated
 from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers, FastRCNNOutputs
 from detectron2.modeling.roi_heads.rotated_fast_rcnn import RotatedFastRCNNOutputs
@@ -25,7 +26,7 @@ class FastRCNNTest(unittest.TestCase):
         cls_agnostic_bbox_reg = False
 
         box_predictor = FastRCNNOutputLayers(
-            box_head_output_size, num_classes, cls_agnostic_bbox_reg, box_dim=4
+            ShapeSpec(channels=box_head_output_size), num_classes, cls_agnostic_bbox_reg, box_dim=4
         )
         feature_pooled = torch.rand(2, box_head_output_size)
         pred_class_logits, pred_proposal_deltas = box_predictor(feature_pooled)
@@ -52,6 +53,24 @@ class FastRCNNTest(unittest.TestCase):
         }
         for name in expected_losses.keys():
             assert torch.allclose(losses[name], expected_losses[name])
+
+    def test_fast_rcnn_empty_batch(self):
+        cfg = get_cfg()
+        cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_WEIGHTS = (10, 10, 5, 5)
+        box2box_transform = Box2BoxTransform(weights=cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_WEIGHTS)
+
+        logits = torch.randn(0, 100, requires_grad=True)
+        deltas = torch.randn(0, 4, requires_grad=True)
+        outputs = FastRCNNOutputs(box2box_transform, logits, deltas, [], 0.5)
+        losses = outputs.losses()
+        for value in losses.values():
+            self.assertTrue(torch.allclose(value, torch.zeros_like(value)))
+        sum(losses.values()).backward()
+        self.assertTrue(logits.grad is not None)
+        self.assertTrue(deltas.grad is not None)
+
+        predictions, _ = outputs.inference(0.05, 0.5, 100)
+        self.assertEqual(len(predictions), 0)
 
     def test_fast_rcnn_rotated(self):
         torch.manual_seed(132)
